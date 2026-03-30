@@ -11,7 +11,7 @@ PULSE collects system metrics (CPU, RAM, processes), preprocesses them, trains M
 - **Real-time System Metrics**: Captures CPU, RAM, and process count continuously
 - **ML Models**: Trains Logistic Regression, Random Forest, and SVM
 - **Live Predictions**: Predicts system spikes with clear alert status (✅ stable or 🚨 spike alert)
-- **Interactive Dashboard**: Streamlit UI with live metrics and history graphs
+- **Interactive Dashboard**: Monochrome Streamlit UI with live metrics, model comparison, ensemble confidence, activity feed, and history download
 - **Clean Git Workflow**: Feature branches for each development phase
 
 ## Project Structure
@@ -31,7 +31,9 @@ PULSE/
 ├── evaluate.py             # Phase 4: Evaluate model metrics
 ├── predict_live.py         # Phase 5: Real-time predictions
 ├── app.py                  # Phase 6: Streamlit dashboard
+├── start.sh                # One-command local launcher
 ├── requirements.txt        # Project dependencies
+├── .gitignore              # Ignore local environment/cache files
 └── README.md              # This file
 ```
 
@@ -53,6 +55,13 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```bash
 pip install -r requirements.txt
 ```
+
+### 4. Quick start (recommended)
+```bash
+chmod +x start.sh
+./start.sh
+```
+This script prepares the environment, checks data/model artifacts, and launches Streamlit locally.
 
 ## Usage
 
@@ -97,7 +106,9 @@ streamlit run app.py
 Opens at `http://localhost:8501` with:
 - Live metrics display
 - Spike prediction alert
-- 50-sample history graph
+- Model comparison table and ensemble confidence meter
+- Metrics history chart + downloadable CSV
+- Recent activity feed
 
 ## How It Works
 
@@ -155,6 +166,13 @@ python data_collection.py  # Collect more data with higher system load
 ### Streamlit not starting
 ```bash
 pip install --upgrade streamlit
+```
+
+### Download button text not visible
+Hard refresh the browser after CSS updates:
+```bash
+# In browser
+Ctrl+Shift+R
 ```
 
 ## Performance Notes

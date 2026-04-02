@@ -65,39 +65,70 @@ This script prepares the environment, checks data/model artifacts, and launches 
 
 ## Usage
 
-### Phase 1: Collect System Metrics
+### Phase 1: Collect System Metrics (Diverse Scenarios)
 ```bash
-python data_collection.py --samples 100 --delay 2
+python data_collection.py --samples 100 --delay 2 --scenario normal
 ```
 - `--samples`: Number of data points to collect (default: 30)
 - `--delay`: Seconds between samples (default: 2)
+- `--scenario`: Dataset tag (`idle`, `normal`, `cpu_stress`, `ram_stress`, `mixed`)
 
-### Phase 2: Preprocess Data
+Recommended balanced collection for better model accuracy:
 ```bash
-python preprocess.py
+# baseline
+python data_collection.py --samples 120 --delay 2 --scenario idle
+python data_collection.py --samples 200 --delay 2 --scenario normal
+
+# while running stress workload
+python data_collection.py --samples 150 --delay 1 --scenario cpu_stress
+python data_collection.py --samples 150 --delay 1 --scenario ram_stress
+python data_collection.py --samples 150 --delay 1 --scenario mixed
 ```
-Creates spike labels: `spike=1` if CPU > 80%, else `spike=0`
 
-### Phase 3: Train Models
+### Phase 2: Preprocess Data (Forecast Labels + Temporal Features)
 ```bash
-python train.py
+python preprocess.py --label-mode forecast --horizon-steps 5 --window-sizes 3,5
+```
+Creates forecast target and temporal features:
+- `spike=1` means CPU is expected to cross threshold at `t + horizon`
+- Adds lag/rolling/delta features for CPU, RAM, and process count
+
+Legacy simple mode is still available:
+```bash
+python preprocess.py --label-mode simple --cpu-threshold 80
+```
+
+### Phase 3: Train Models (Chronological Train/Test Split)
+```bash
+python train.py --test-size 0.2 --horizon-steps 5
 ```
 Trains and saves:
 - Logistic Regression
 - Random Forest (100 estimators)
 - SVM (RBF kernel)
 
+Training now uses chronological split:
+- oldest 80% rows -> train
+- latest 20% rows -> held-out test
+
 ### Phase 4: Evaluate Models
 ```bash
-python evaluate.py
+python evaluate.py --test-size 0.2
 ```
-Displays: Accuracy, Precision, Recall, Confusion Matrix
+Displays train and held-out test metrics:
+- Accuracy
+- Precision
+- Recall
+- F1
+- ROC-AUC
+- Confusion Matrix
+- Train-test F1 gap (overfitting signal)
 
-### Phase 5: Real-Time Prediction
+### Phase 5: Real-Time Forecast Prediction
 ```bash
 python predict_live.py --samples 5
 ```
-Makes 5 live predictions with spike alerts
+Makes 5 live near-future forecasts using temporal feature window and soft-voting ensemble
 
 ### Phase 6: Launch Dashboard (Recommended)
 ```bash
@@ -112,21 +143,22 @@ Opens at `http://localhost:8501` with:
 
 ## How It Works
 
-**Spike Label Rule:**
+**Forecast Label Rule (default mode):**
 ```
-spike = 1 if CPU_percent > 80 else 0
+spike_t = 1 if CPU_percent at (t + horizon) > threshold else 0
 ```
 
 **Model Training:**
-- Features: [CPU%, RAM%, Process Count]
-- Target: Spike (0 or 1)
-- Strategy: Trains on preprocessed data, saves models as pickle files
+- Features: current + temporal features (lags, rolling means/std, deltas)
+- Target: Future spike (0 or 1)
+- Strategy: chronological split training with held-out testing
 
-**Real-Time Prediction:**
-- Captures current system state
+**Real-Time Forecasting:**
+- Captures current system state continuously
+- Builds live temporal feature row from recent history
 - Loads trained models
-- Averages predictions from all 3 models
-- Alert: If average > 0.5 → spike alert, else stable
+- Averages model spike probabilities (soft voting)
+- Alert: If average > 0.5 -> high near-future spike likelihood
 
 ## Viva Explanation Points
 

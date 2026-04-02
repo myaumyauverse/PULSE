@@ -23,17 +23,17 @@ python -m pip install --prefer-binary -r requirements.txt
 
 if [[ ! -f "data/system_metrics.csv" ]]; then
   echo "PULSE: system_metrics.csv not found -> collecting quick starter data"
-  python data_collection.py --samples 30 --delay 1
+  python data_collection.py --samples 30 --delay 1 --scenario normal
 fi
 
 if [[ ! -f "data/system_metrics_labeled.csv" ]]; then
-  echo "PULSE: labeled dataset not found -> preprocessing"
-  python preprocess.py
+  echo "PULSE: labeled dataset not found -> preprocessing (forecast mode)"
+  python preprocess.py --label-mode forecast --horizon-steps 5 --window-sizes 3,5
 fi
 
 if [[ ! -f "models/logistic_regression.pkl" || ! -f "models/random_forest.pkl" || ! -f "models/svm.pkl" ]]; then
   echo "PULSE: one or more model files missing -> training models"
-  python train.py || {
+  python train.py --test-size 0.2 --horizon-steps 5 || {
     echo "PULSE: Training failed. Check train.py before launching app."
     exit 1
   }

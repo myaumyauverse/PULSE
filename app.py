@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from pathlib import Path
 
 import joblib
@@ -6,9 +7,12 @@ import pandas as pd
 import psutil
 import streamlit as st
 
+from feature_engineering import BASE_FEATURE_COLUMNS, build_live_feature_frame
+
 
 FEATURE_COLUMNS = ["cpu_percent", "ram_percent", "process_count"]
 MODELS_DIR = Path("models")
+SUMMARY_FILE = MODELS_DIR / "training_summary.json"
 MODEL_FILES = {
     "Logistic Regression": MODELS_DIR / "logistic_regression.pkl",
     "Random Forest": MODELS_DIR / "random_forest.pkl",
@@ -184,6 +188,13 @@ def load_models() -> dict:
     return models
 
 
+@st.cache_resource
+def load_training_summary() -> dict:
+    if SUMMARY_FILE.exists():
+        return json.loads(SUMMARY_FILE.read_text(encoding="utf-8"))
+    return {"feature_columns": BASE_FEATURE_COLUMNS, "horizon_steps": 0, "calibrated_threshold": 0.5}
+
+
 def get_current_metrics() -> dict:
     return {
         "cpu_percent": psutil.cpu_percent(interval=0.5),
@@ -192,14 +203,17 @@ def get_current_metrics() -> dict:
     }
 
 
-def compare_models(models: dict, metrics: dict) -> tuple[pd.DataFrame, float, int]:
-    x_live = pd.DataFrame([metrics], columns=FEATURE_COLUMNS)
+def compare_models(
+    models: dict,
+    x_live: pd.DataFrame,
+    calibrated_threshold: float,
+) -> tuple[pd.DataFrame, float, int]:
     rows = []
 
     for model_name, model in models.items():
         if hasattr(model, "predict_proba"):
             spike_prob = float(model.predict_proba(x_live)[0][1])
-            pred = int(spike_prob >= 0.5)
+            pred = int(spike_prob >= calibrated_threshold)
         else:
             pred = int(model.predict(x_live)[0])
             spike_prob = float(pred)
@@ -217,7 +231,7 @@ def compare_models(models: dict, metrics: dict) -> tuple[pd.DataFrame, float, in
         return comparison_df, 0.0, 0
 
     ensemble_score = float(comparison_df["spike_probability"].mean())
-    ensemble_pred = int(ensemble_score >= 0.5)
+    ensemble_pred = int(ensemble_score >= calibrated_threshold)
     return comparison_df, ensemble_score, ensemble_pred
 
 
@@ -259,8 +273,29 @@ run_every = f"{refresh_interval}s" if auto_refresh else None
 @st.fragment(run_every=run_every)
 def live_dashboard() -> None:
     metrics = get_current_metrics()
+    if "raw_live_history" not in st.session_state:
+        st.session_state.raw_live_history = []
+    st.session_state.raw_live_history.append(metrics)
+
     models = load_models()
-    comparison_df, ensemble_score, ensemble_pred = compare_models(models, metrics)
+    summary = load_training_summary()
+    feature_columns = summary.get("feature_columns", FEATURE_COLUMNS)
+    horizon_steps = int(summary.get("horizon_steps", 0))
+    calibrated_threshold = float(summary.get("calibrated_threshold", 0.5))
+    x_live = build_live_feature_frame(
+        history_rows=st.session_state.raw_live_history,
+        feature_columns=feature_columns,
+        window_sizes=[3, 5],
+    )
+
+    if x_live is not None:
+        comparison_df, ensemble_score, ensemble_pred = compare_models(
+            models,
+            x_live,
+            calibrated_threshold,
+        )
+    else:
+        comparison_df, ensemble_score, ensemble_pred = pd.DataFrame(), 0.0, 0
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -273,23 +308,36 @@ def live_dashboard() -> None:
     st.markdown("---")
     st.subheader("Spike Prediction")
 
-    if comparison_df.empty:
+    if not models:
         st.warning("Models not found. Run training first.")
+    elif x_live is None:
+        st.info("Warming up temporal window for forecast features...")
     else:
         if ensemble_pred == 1:
-            st.markdown('<div class="panel status-alert">⚠️ <b>PULSE Alert:</b> High chance of spike</div>', unsafe_allow_html=True)
+            if horizon_steps > 0:
+                st.markdown(
+                    f'<div class="panel status-alert">⚠️ <b>PULSE Alert:</b> High chance of spike within next {horizon_steps} steps</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown('<div class="panel status-alert">⚠️ <b>PULSE Alert:</b> High chance of spike</div>', unsafe_allow_html=True)
             if st.session_state.last_alert_state != "alert":
-                log_activity("Spike alert triggered by ensemble", "danger")
+                log_activity("Forecast alert triggered by ensemble", "danger")
                 st.session_state.last_alert_state = "alert"
         else:
-            st.markdown('<div class="panel status-good">✅ <b>PULSE Status:</b> System stable</div>', unsafe_allow_html=True)
+            st.markdown('<div class="panel status-good">✅ <b>PULSE Status:</b> Near-future forecast stable</div>', unsafe_allow_html=True)
             if st.session_state.last_alert_state != "stable":
-                log_activity("System stable by ensemble decision", "success")
+                log_activity("Near-future stable by ensemble decision", "success")
                 st.session_state.last_alert_state = "stable"
 
         st.markdown("### Ensemble Confidence")
         st.progress(int(min(max(ensemble_score, 0.0), 1.0) * 100))
-        st.caption(f"Ensemble score: {ensemble_score:.2f} (threshold = 0.50)")
+        if horizon_steps > 0:
+            st.caption(
+                f"Ensemble score: {ensemble_score:.2f} (threshold = {calibrated_threshold:.2f}), forecast horizon = {horizon_steps} steps"
+            )
+        else:
+            st.caption(f"Ensemble score: {ensemble_score:.2f} (threshold = {calibrated_threshold:.2f})")
 
         st.subheader("Model Comparison")
         st.dataframe(comparison_df, use_container_width=True, hide_index=True)
@@ -298,7 +346,7 @@ def live_dashboard() -> None:
         st.info(
             "Ensemble process: average spike probability across all models. "
             f"mean([{prob_list}]) = {ensemble_score:.2f}. "
-            f"Threshold 0.50 -> {'Spike' if ensemble_pred == 1 else 'Stable'}."
+            f"Threshold {calibrated_threshold:.2f} -> {'Spike' if ensemble_pred == 1 else 'Stable'}."
         )
 
     st.markdown("---")

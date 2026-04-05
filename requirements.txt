@@ -3,3 +3,4 @@ psutil>=5.9
 scikit-learn>=1.5
 joblib>=1.4
 streamlit>=1.40
+matplotlib>=3.9

@@ -12,6 +12,8 @@ PULSE collects system metrics (CPU, RAM, processes), preprocesses them, trains M
 - **ML Models**: Trains Logistic Regression, Random Forest, and SVM
 - **Live Predictions**: Predicts system spikes with clear alert status (✅ stable or 🚨 spike alert)
 - **Interactive Dashboard**: Monochrome Streamlit UI with live metrics, model comparison, ensemble confidence, activity feed, and history download
+- **Flexible Bootstrap Modes**: Quick startup or full stress-based auto-collection + retraining
+- **Analysis Reports**: Auto-generate ROC and confusion-matrix plots for all models + ensemble
 - **Clean Git Workflow**: Feature branches for each development phase
 
 ## Project Structure
@@ -32,6 +34,9 @@ PULSE/
 ├── predict_live.py         # Phase 5: Real-time predictions
 ├── app.py                  # Phase 6: Streamlit dashboard
 ├── start.sh                # One-command local launcher
+├── auto_collect_and_train.sh # Full stress-based collection + training pipeline
+├── analysis_multiplots.py  # ROC/confusion-matrix report generator
+├── reports/                # Generated report images
 ├── requirements.txt        # Project dependencies
 ├── .gitignore              # Ignore local environment/cache files
 └── README.md              # This file
@@ -62,6 +67,16 @@ chmod +x start.sh
 ./start.sh
 ```
 This script prepares the environment, checks data/model artifacts, and launches Streamlit locally.
+
+Quick mode is default:
+```bash
+BOOTSTRAP_MODE=quick ./start.sh
+```
+
+For full stress-based automation (requires stress-ng):
+```bash
+BOOTSTRAP_MODE=full ./start.sh
+```
 
 ## Usage
 
@@ -129,6 +144,24 @@ Displays train and held-out test metrics:
 python predict_live.py --samples 5
 ```
 Makes 5 live near-future forecasts using temporal feature window and soft-voting ensemble
+
+### Automated Full Pipeline (Stress + Collect + Preprocess + Train + Evaluate)
+```bash
+chmod +x auto_collect_and_train.sh
+./auto_collect_and_train.sh
+```
+Useful env overrides:
+```bash
+TARGET_ROWS=2500 HORIZON_STEPS=5 TEST_SIZE=0.2 ./auto_collect_and_train.sh
+```
+
+### Generate Analysis Plots
+```bash
+python analysis_multiplots.py --data data/system_metrics_labeled.csv --models-dir models --output-dir reports
+```
+Outputs:
+- `reports/roc_curves.png`
+- `reports/confusion_matrices_2x2.png`
 
 ### Phase 6: Launch Dashboard (Recommended)
 ```bash
@@ -198,6 +231,12 @@ python data_collection.py  # Collect more data with higher system load
 ### Streamlit not starting
 ```bash
 pip install --upgrade streamlit
+```
+
+### Full bootstrap mode fails immediately
+Install stress-ng first:
+```bash
+sudo apt-get install -y stress-ng
 ```
 
 ### Download button text not visible
